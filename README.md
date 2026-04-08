@@ -1,10 +1,14 @@
-# Poolsuite FM for Roon
+# Poolsuite FM for Roon / Bluesound / Sonos
 
-Stream [Poolsuite FM](https://poolsuite.net/) — the retro-styled, SoundCloud-powered internet radio — directly to your [Roon](https://roonlabs.com/) home audio system.
+<table><tr>
+<td width="60%">Stream the impeccable vibes of <a href="https://poolsuite.net/" target="_blank">Poolsuite FM</a> — the retro-styled, SoundCloud-powered internet radio — directly to your <a href="https://roonlabs.com/" target="_blank">Roon</a>, <a href="https://www.bluesound.com/">Bluesound</a>, or <a href="https://sonos.com" target="_blank">Sonos</a> home audio system.
+<br><br>This bridge runs a local internet radio station that Roon picks up natively (and Bluesound / Sonos can access via TuneIn) as a Live Radio stream, complete with track metadata so your player of choice can display artist info, album art, and link to matching content in Tidal or Qobuz.
+  <br><br>
+  This package also runs a web browser GUI to control your local radio station, which also can change what is streamed to Roon. (screenshots below)
+</td>
+<td><img src="artwork.jpg" alt="Poolsuite FM" width="300" align="center"></td>
+</tr></table>
 
-This bridge runs a local internet radio station that Roon picks up natively as a Live Radio stream, complete with track metadata so Roon can display artist info, album art, and link to matching content in Tidal or Qobuz.
-
-![Poolsuite FM](artwork.jpg)
 
 | Dark Mode | Light Mode |
 |-----------|------------|
