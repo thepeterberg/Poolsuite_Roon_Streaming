@@ -1,10 +1,20 @@
-# Poolsuite FM for Roon
+# Poolsuite FM for Roon / Bluesound / Sonos
 
-Stream [Poolsuite FM](https://poolsuite.net/) — the retro-styled, SoundCloud-powered internet radio — directly to your [Roon](https://roonlabs.com/) home audio system.
+<table><tr>
+<td width="60%">Stream the impeccable vibes of <a href="https://poolsuite.net/" target="_blank">Poolsuite FM</a> — the retro-styled, SoundCloud-powered internet radio — directly to your <a href="https://roonlabs.com/" target="_blank">Roon</a>, <a href="https://www.bluesound.com/">Bluesound</a>, or <a href="https://sonos.com" target="_blank">Sonos</a> home audio system.
+<br><br>This bridge runs a local internet radio station that Roon picks up natively (and Bluesound / Sonos can access via TuneIn) as a Live Radio stream, complete with track metadata so your player of choice can display artist info, album art, and link to matching content in Tidal or Qobuz.
+  <br><br>
+  This package also runs a web browser GUI to control your local radio station, which also can change what is streamed to Roon. (screenshots below)
+</td>
+<td><img src="artwork.jpg" alt="Poolsuite FM" width="300" align="center"></td>
+</tr></table>
 
-This bridge runs a local internet radio station that Roon picks up natively as a Live Radio stream, complete with track metadata so Roon can display artist info, album art, and link to matching content in Tidal or Qobuz.
 
-![Poolsuite FM](artwork.jpg)
+| Dark Mode | Light Mode |
+|-----------|------------|
+| ![Dark Mode](screenshots/Poolside_Roon-Dark_mode.jpg) | ![Light Mode](screenshots/Poolside_Roon-Light_mode.jpg) |
+
+![Web UI Demo](screenshots/Poolside_Roon-Darkmode_player_vid.gif)
 
 ## How It Works
 
@@ -133,24 +143,42 @@ python3 main.py --config config.json
 
 ## Web UI & Controls
 
-The bridge includes a lightweight web interface at `http://YOUR_IP:8489/`:
+The bridge includes a retro Miami 80s-styled stereo interface at `http://YOUR_IP:8489/` with dark and light themes:
+
+- **LCD display** with scrolling marquee showing the current track (linked to SoundCloud)
+- **Transport controls** — Previous, Play/Pause, Next
+- **Analog channel selector dial** that animates when switching channels
+- **Channel buttons** to switch between Poolsuite playlists on the fly
+- **In-browser audio player** for listening directly
+- **Play history** with SoundCloud links for each track
+- **Copy-to-clipboard** buttons for all endpoint URLs
 
 | Endpoint | Description |
 |----------|-------------|
-| `/` | Web UI — now playing, listener count, skip button, audio player |
+| `/` | Web UI — retro stereo interface with transport controls and play history |
 | `/stream` | MP3 audio stream (this is what you add to Roon) |
 | `/stream.mp3` | Alias for `/stream` |
-| `/skip` | Skip the current track (GET or POST) |
+| `/skip` | Skip to the next track (GET or POST) |
+| `/prev` | Go back to the previous track (GET or POST) |
+| `/channel?name=X` | Switch channel; omit `name` to list available channels (GET) |
 | `/status` | JSON API — now playing, listeners, uptime |
 
-### Skipping Tracks
+### Track Controls
 
-Roon's transport controls (next/previous) don't work with radio streams. To skip a track:
+Roon's transport controls (next/previous) don't work with radio streams. Use these instead:
 
-- **Web UI**: Open `http://YOUR_IP:8489/` and click **Skip Track**
-- **API**: `curl http://YOUR_IP:8489/skip`
-- **macOS Shortcut**: Create a Shortcuts automation that fetches the `/skip` URL, then assign a keyboard shortcut
-- **Home Assistant / Streamdeck**: Call the `/skip` endpoint as an HTTP action
+- **Web UI**: Open `http://YOUR_IP:8489/` and use the **PREV** / **NEXT** transport buttons
+- **API**: `curl http://YOUR_IP:8489/skip` or `curl http://YOUR_IP:8489/prev`
+- **macOS Shortcut**: Create a Shortcuts automation that fetches the `/skip` or `/prev` URL, then assign a keyboard shortcut
+- **Home Assistant / Streamdeck**: Call the `/skip` or `/prev` endpoint as an HTTP action
+
+### Channel Switching
+
+Switch between Poolsuite playlists without restarting:
+
+- **Web UI**: Click any channel button below the dial, or use the `--playlist` CLI flag for the initial channel
+- **API**: `curl http://YOUR_IP:8489/channel?name=Indie`
+- **List channels**: `curl http://YOUR_IP:8489/channel` (returns JSON with available channels and current selection)
 
 ## Configuration
 
@@ -172,8 +200,10 @@ Copy `config.example.json` to `config.json` and edit as needed:
 | `host` | `"0.0.0.0"` | Bind address |
 | `port` | `8489` | HTTP server port |
 | `bitrate` | `"192k"` | MP3 output bitrate |
-| `crossfade_seconds` | `3` | Silence gap between tracks |
+| `format` | `"mp3"` | Output audio format |
+| `crossfade_seconds` | `2` | Seconds of silence between tracks |
 | `shuffle` | `true` | Randomize track order |
+| `poolsuite_api` | `"https://api.poolsidefm.workers.dev"` | Poolsuite API base URL |
 | `playlist_filter` | `null` | Only play tracks from playlists matching this name |
 
 ## Running as a Background Service
@@ -244,7 +274,8 @@ launchctl load ~/Library/LaunchAgents/com.poolsuite.roon.plist
 │  main.py — Orchestrator                              │
 │  Fetches playlists, resolves tracks, manages queue    │
 │  Pre-resolves next track while current plays          │
-│  Pushes silence to keep stream alive during gaps      │
+│  Feeds realtime silence to keep stream alive in gaps  │
+│  Handles skip, previous track, and channel switching  │
 ├──────────────────────────────────────────────────────┤
 │  poolsuite_client.py — Poolsuite API Client           │
 │  GET /v1/get_tracks_by_playlist → playlist + tracks   │
@@ -253,13 +284,19 @@ launchctl load ~/Library/LaunchAgents/com.poolsuite.roon.plist
 ├──────────────────────────────────────────────────────┤
 │  audio_pipeline.py — Audio Pipeline                   │
 │  yt-dlp: resolve SoundCloud → direct audio URL        │
-│  ffmpeg: transcode to 192k MP3, realtime output       │
+│  ffmpeg master encoder: continuous 192k MP3 stream    │
+│  ffmpeg decoder: per-track PCM fed into master encoder│
 ├──────────────────────────────────────────────────────┤
 │  stream_server.py — HTTP Radio Server                 │
 │  /stream: continuous MP3 with ICY metadata injection   │
-│  /skip: advance to next track                         │
+│  /skip, /prev: track navigation                       │
+│  /channel: playlist switching                         │
 │  /status: JSON now-playing info                       │
-│  /: web UI with player and skip button                │
+│  /: retro stereo web UI with transport + history      │
+├──────────────────────────────────────────────────────┤
+│  template.html — Retro Miami 80s Web UI               │
+│  LCD marquee, transport controls, analog channel dial │
+│  Play history with SoundCloud links, dark/light theme │
 └──────────────────────────────────────────────────────┘
           │
           ▼
