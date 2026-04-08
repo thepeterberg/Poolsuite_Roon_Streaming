@@ -111,6 +111,71 @@ You'll see:
 
 Roon treats this like any internet radio station — zone grouping, volume, DSP, and signal path all work normally.
 
+## Adding to Bluesound
+
+Bluesound players can play any MP3 stream URL directly via the BluOS app — no TuneIn account needed.
+
+1. Find your machine's local IP (see above)
+2. Open the **BluOS** app on your phone, tablet, or desktop
+3. Tap the **Browse** tab (bottom nav)
+4. Tap **TuneIn** (or **Radio Paradise** — either works, we just need to get to the custom URL option)
+5. Instead of browsing TuneIn, tap the **three dots** menu (top right) and select **Add Custom Station**
+6. Enter the stream URL: `http://YOUR_IP:8489/stream`
+7. Name it **Poolsuite FM**
+8. Tap **Save**
+
+The station now appears in your **My Presets** or **My Radio Stations** list and can be played on any Bluesound player or group.
+
+**Alternative — direct play via URL:**
+If you don't see the custom station option, you can use the BluOS API directly. Open a browser and navigate to:
+```
+http://BLUESOUND_IP:11000/Play?url=http://YOUR_IP:8489/stream&preset_id=1&image=/images/radio.png
+```
+Replace `BLUESOUND_IP` with your Bluesound player's IP address. This starts playback immediately.
+
+**Note:** ICY metadata (track titles) works with Bluesound — you'll see the current artist and song on the player display and in the BluOS app.
+
+## Adding to Sonos
+
+Sonos can play any MP3 stream via the TuneIn "My Radio Stations" feature. This uses TuneIn's website to register your local stream URL, which then syncs to your Sonos system.
+
+### Option 1: Via TuneIn (recommended)
+
+1. Find your machine's local IP (see above)
+2. Go to [tunein.com](https://tunein.com/) and sign in (create a free account if needed)
+3. Make sure your Sonos system is linked to the **same TuneIn account** (Sonos app > Settings > Services & Voice > TuneIn)
+4. On the TuneIn website, go to **My Profile** > **My Custom URLs** (or visit `https://tunein.com/user/custom-url/`)
+5. Click **Add Custom URL**
+6. Enter the stream URL: `http://YOUR_IP:8489/stream`
+7. Name it **Poolsuite FM**
+8. Save
+
+Now in the **Sonos app**:
+1. Go to **Browse** > **TuneIn** > **My Radio Stations**
+2. **Poolsuite FM** should appear in the list
+3. Tap to play on any room or group
+
+**Important:** Your Sonos speakers need to be able to reach the machine running the bridge on your local network. The TuneIn custom URL is just a pointer — the audio streams directly from your machine to the Sonos speakers.
+
+### Option 2: Direct play via Sonos API
+
+If you have the Sonos HTTP API (e.g. [node-sonos-http-api](https://github.com/jishi/node-sonos-http-api)) running, you can start playback directly:
+```bash
+curl "http://SONOS_API_IP:5005/ROOM_NAME/setavtransporturi/http://YOUR_IP:8489/stream"
+```
+
+### Option 3: Via the Sonos desktop controller
+
+1. Open the **Sonos desktop app** (Windows or macOS — not the mobile app)
+2. Go to **Manage** > **Add Radio Station**
+3. Enter the stream URL: `http://YOUR_IP:8489/stream`
+4. Name it **Poolsuite FM**
+5. Click **OK**
+
+The station appears under **My Radio Stations** and is accessible from all Sonos apps.
+
+**Note:** Sonos supports ICY metadata, so track titles will display in the app and on Sonos displays (e.g. Era 300, Move 2).
+
 ## CLI Options
 
 ```
