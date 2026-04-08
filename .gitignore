@@ -12,3 +12,4 @@ venv/
 .vscode/
 *.swp
 .DS_Store
+screenshots/*.mov

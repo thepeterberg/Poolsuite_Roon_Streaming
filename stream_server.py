@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """HTTP streaming server that serves a continuous MP3 stream.
 
 Listeners (including Roon) connect to /stream and receive a
@@ -7,6 +9,8 @@ ICY metadata is optionally injected for track titles.
 
 import asyncio
 import logging
+import os
+import socket
 import time
 
 from aiohttp import web
@@ -33,25 +37,57 @@ class RadioServer:
         self.port = port
         self._listeners: list[asyncio.Queue] = []
         self._now_playing: str = "Poolsuite FM"
+        self._current_channel: str = "All"
+        self._available_channels: list[str] = []
         self._running = False
         self._skip_event: asyncio.Event = asyncio.Event()
+        self._prev_event: asyncio.Event = asyncio.Event()
+        self._channel_change_event: asyncio.Event = asyncio.Event()
+        self._pending_channel: str | None = None
         self._app = web.Application()
         self._app.router.add_get("/stream", self._handle_stream)
         self._app.router.add_get("/stream.mp3", self._handle_stream)
         self._app.router.add_get("/status", self._handle_status)
         self._app.router.add_post("/skip", self._handle_skip)
         self._app.router.add_get("/skip", self._handle_skip)
+        self._app.router.add_post("/prev", self._handle_prev)
+        self._app.router.add_get("/prev", self._handle_prev)
+        self._app.router.add_get("/channel", self._handle_channel)
         self._app.router.add_get("/", self._handle_index)
         self._started_at = time.time()
         self._tracks_played = 0
+        self._history: list[tuple[str, float]] = []  # (title, timestamp)
+
+    @staticmethod
+    def _detect_local_ip() -> str:
+        """Detect the machine's local network IP address."""
+        try:
+            # Connect to a public DNS to determine which interface is used
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    @property
+    def local_ip(self) -> str:
+        if not hasattr(self, "_local_ip"):
+            self._local_ip = self._detect_local_ip()
+        return self._local_ip
 
     @property
     def stream_url(self) -> str:
-        return f"http://{self.host}:{self.port}/stream"
+        return f"http://{self.local_ip}:{self.port}/stream"
 
-    def set_now_playing(self, title: str) -> None:
+    def set_now_playing(self, title: str, soundcloud_url: str | None = None) -> None:
         self._now_playing = title
+        self._now_playing_url = soundcloud_url
         self._tracks_played += 1
+        self._history.insert(0, (title, time.time(), soundcloud_url))
+        # Keep last 100 tracks
+        self._history = self._history[:100]
         logger.info("Now playing: %s", title)
 
     async def push_audio(self, data: bytes) -> None:
@@ -153,14 +189,58 @@ class RadioServer:
         should check/await this and clear it after advancing."""
         return self._skip_event
 
+    @property
+    def prev_event(self) -> asyncio.Event:
+        """Event that is set when a previous track is requested."""
+        return self._prev_event
+
+    @property
+    def channel_change_event(self) -> asyncio.Event:
+        """Event set when a channel change is requested."""
+        return self._channel_change_event
+
+    @property
+    def pending_channel(self) -> str | None:
+        """The channel name requested via the web UI, or None."""
+        return self._pending_channel
+
+    def set_available_channels(self, channels: list[str]) -> None:
+        self._available_channels = channels
+
+    def set_current_channel(self, name: str) -> None:
+        self._current_channel = name
+
     async def _handle_skip(self, request: web.Request) -> web.Response:
         """Handle a skip request — advance to the next track."""
         logger.info("Skip requested")
         self._skip_event.set()
-        # If request accepts HTML (browser), redirect back to web UI
         if "text/html" in request.headers.get("Accept", ""):
             raise web.HTTPFound("/")
         return web.json_response({"status": "skipping", "was_playing": self._now_playing})
+
+    async def _handle_prev(self, request: web.Request) -> web.Response:
+        """Handle a previous track request — go back to the prior track."""
+        logger.info("Previous track requested")
+        self._prev_event.set()
+        self._skip_event.set()  # Stop the current track
+        if "text/html" in request.headers.get("Accept", ""):
+            raise web.HTTPFound("/")
+        return web.json_response({"status": "going_back", "was_playing": self._now_playing})
+
+    async def _handle_channel(self, request: web.Request) -> web.Response:
+        """Handle a channel change request."""
+        name = request.query.get("name", "").strip()
+        if not name:
+            return web.json_response(
+                {"channels": self._available_channels, "current": self._current_channel}
+            )
+        logger.info("Channel change requested: %s", name)
+        self._pending_channel = name if name != "All" else None
+        self._channel_change_event.set()
+        self._skip_event.set()  # Also skip current track to switch faster
+        if "text/html" in request.headers.get("Accept", ""):
+            raise web.HTTPFound("/")
+        return web.json_response({"status": "switching", "channel": name})
 
     async def _handle_status(self, request: web.Request) -> web.Response:
         """Return JSON status of the radio server."""
@@ -173,30 +253,86 @@ class RadioServer:
             "stream_url": self.stream_url,
         })
 
+    def _render_history(self) -> str:
+        """Render the play history as HTML rows."""
+        if not self._history:
+            return '<div class="history-empty">No tracks played yet</div>'
+        now = time.time()
+        rows = []
+        for i, entry in enumerate(self._history):
+            title, ts = entry[0], entry[1]
+            sc_url = entry[2] if len(entry) > 2 else None
+            ago = int(now - ts)
+            if ago < 60:
+                time_str = "just now" if ago < 10 else f"{ago}s ago"
+            elif ago < 3600:
+                time_str = f"{ago // 60}m ago"
+            else:
+                time_str = f"{ago // 3600}h {(ago % 3600) // 60}m ago"
+            label = "NOW" if i == 0 else str(i)
+            # Split "Artist - Title" if possible
+            if " - " in title:
+                artist, track = title.split(" - ", 1)
+                text = f"<strong>{artist}</strong> &mdash; {track}"
+            else:
+                text = f"<strong>{title}</strong>"
+            if sc_url:
+                display = (
+                    f'<a href="{sc_url}" target="_blank" '
+                    f'style="color: #e0d68a; text-decoration: none; '
+                    f'border-bottom: 1px solid rgba(224,214,138,0.2);">{text}</a>'
+                )
+            else:
+                display = text
+            rows.append(
+                f'<div class="history-row">'
+                f'<span class="track-num">{label}</span>'
+                f'<span class="track-title">{display}</span>'
+                f'<span class="track-time">{time_str}</span>'
+                f'</div>'
+            )
+        return "\n".join(rows)
+
+    def _load_template(self) -> str:
+        """Load the HTML template from template.html."""
+        template_path = os.path.join(os.path.dirname(__file__) or ".", "template.html")
+        with open(template_path) as f:
+            return f.read()
+
     async def _handle_index(self, request: web.Request) -> web.Response:
-        """Simple landing page."""
-        html = f"""<!DOCTYPE html>
-<html>
-<head><title>Poolsuite Roon Bridge</title></head>
-<body style="font-family: monospace; background: #1a1a2e; color: #e0d68a; padding: 2em;">
-  <h1>🌴 Poolsuite → Roon Bridge</h1>
-  <p>Now Playing: <strong>{self._now_playing}</strong></p>
-  <p>Listeners: {len(self._listeners)}</p>
-  <p>Tracks played: {self._tracks_played}</p>
-  <hr>
-  <p>Stream URL: <a href="/stream" style="color: #64dfdf;">{self.stream_url}</a></p>
-  <p>Status API: <a href="/status" style="color: #64dfdf;">/status</a></p>
-  <hr>
-  <p>Add <code>{self.stream_url}</code> as a Live Radio station in Roon.</p>
-  <div style="margin: 1.5em 0;">
-    <a href="/skip" style="display: inline-block; padding: 0.8em 2em; background: #e0d68a; color: #1a1a2e; text-decoration: none; font-weight: bold; font-size: 1.1em; border: none; cursor: pointer;">Skip Track &raquo;</a>
-  </div>
-  <audio controls src="/stream" style="width: 100%; margin-top: 1em;">
-    Your browser does not support the audio element.
-  </audio>
-</body>
-</html>"""
+        """Render the web UI from template.html with live data."""
+        ip = self.local_ip
+        base = f"http://{ip}:{self.port}"
+
+        # Build channel buttons
+        channel_buttons = ""
+        all_channels = ["All"] + self._available_channels
+        for ch in all_channels:
+            is_current = (ch == self._current_channel)
+            channel_buttons += (
+                f'<a href="/channel?name={ch}" class="ch-btn'
+                f'{" ch-active" if is_current else ""}">{ch}</a>\n'
+            )
+
+        listeners = len(self._listeners)
+        now_playing_url = getattr(self, "_now_playing_url", "") or ""
+
+        # Load template and substitute
+        html = self._load_template()
+        html = html.replace("{{IP}}", ip)
+        html = html.replace("{{PORT}}", str(self.port))
+        html = html.replace("{{BASE}}", base)
+        html = html.replace("{{NOW_PLAYING}}", self._now_playing)
+        html = html.replace("{{NOW_PLAYING_URL}}", now_playing_url)
+        html = html.replace("{{CHANNEL}}", self._current_channel)
+        html = html.replace("{{LISTENERS}}", str(listeners))
+        html = html.replace("{{LISTENERS_S}}", "s" if listeners != 1 else "")
+        html = html.replace("{{TRACKS_PLAYED}}", str(self._tracks_played))
+        html = html.replace("{{CHANNEL_BUTTONS}}", channel_buttons)
+        html = html.replace("{{HISTORY}}", self._render_history())
+
         return web.Response(text=html, content_type="text/html")
+
 
     async def start(self) -> web.AppRunner:
         """Start the HTTP server."""
