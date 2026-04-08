@@ -65,7 +65,7 @@ Install [WSL](https://learn.microsoft.com/en-us/windows/wsl/install), then follo
 
 ```bash
 # Clone the repo
-git clone https://github.com/thepeterberg/poolsuite-roon-streaming.git
+git clone https://github.com/thepeterberg/Poolsuite_Roon_Streaming.git
 cd poolsuite-roon-streaming
 
 # Install Python dependencies
